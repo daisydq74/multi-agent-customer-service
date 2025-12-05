@@ -1,0 +1,46 @@
+=== Scenario 1 ===
+Query: Get customer information for ID 5
+A2A Log:
+[A2A] from=Router to=CustomerData action=scenario1.route_to_data args={'customer_id': 5}
+[A2A] from=Router to=CustomerData action=get_customer args={'customer_id': 5}
+Answer: Customer not found.
+
+=== Scenario 2 ===
+Query: I'm customer 12345 and need help upgrading my account
+A2A Log:
+[A2A] from=Router to=CustomerData action=get_customer args={'customer_id': 12345}
+[A2A] from=Router to=Support action=scenario1.handle_support args={'issue': 'Upgrade request'}
+Answer: Support response for customer: Upgrade request.
+
+=== Scenario 3 ===
+Query: Show me all active customers who have open tickets
+A2A Log:
+[A2A] from=Router to=CustomerData action=list_customers args={'status': 'active', 'limit': 50}
+[A2A] from=Router to=CustomerData action=get_customer_history args={'customer_id': 1}
+Answer: No open tickets for active customers.
+
+=== Scenario 4 ===
+Query: I've been charged twice, please refund immediately!
+A2A Log:
+[A2A] from=Router to=CustomerData action=get_customer args={'customer_id': 1}
+[A2A] from=Router to=Support action=scenario2.negotiate args={'issue': 'Billing refund'}
+[A2A] from=Support to=CustomerData action=create_ticket args={'customer_id': 1, 'issue': 'Billing refund request (duplicate charge)', 'priority': 'high'}
+[A2A] from=Support to=CustomerData action=request_context args={'customer_id': 1}
+[A2A] from=Support to=CustomerData action=get_customer_history args={'customer_id': 1}
+Answer: URGENT: Support response for Ana Customer (id=1): Billing refund. Context: [{'id': 1, 'customer_id': 1, 'issue': 'Billing refund request (duplicate charge)', 'status': 'open', 'priority': 'high', 'created_at': '2025-12-05 02:27:14'}] Ticket created: {'id': 1, 'customer_id': 1, 'issue': 'Billing refund request (duplicate charge)', 'status': 'open', 'priority': 'high', 'created_at': '2025-12-05 02:27:14'}
+
+=== Scenario 5 ===
+Query: Update my email to new@email.com
+ and show my ticket history
+A2A Log:
+[A2A] from=Router to=CustomerData action=update_customer args={'customer_id': 1, 'data': {'email': 'new@email.com'}}
+[A2A] from=Router to=CustomerData action=get_customer_history args={'customer_id': 1}
+[A2A] from=Support to=CustomerData action=get_customer_history args={'customer_id': 1}
+Answer: Email updated to new@email.com. History: [2025-12-05 02:27:14] Billing refund request (duplicate charge) (open, high)
+
+=== Scenario 6 ===
+Query: What's the status of all high-priority tickets for premium customers?
+A2A Log:
+[A2A] from=Router to=CustomerData action=list_customers args={'status': 'active', 'limit': 50}
+[A2A] from=Router to=CustomerData action=get_customer_history args={'customer_id': 1}
+Answer: Ticket 1 for customer 1: Billing refund request (duplicate charge) (open)
