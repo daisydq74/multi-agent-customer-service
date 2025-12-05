@@ -103,6 +103,16 @@ class RouterAgent:
         return f"{reply} Ticket created: {ticket}"
 
     async def _multi_intent_update_email(self, customer_id: int, new_email: Optional[str]) -> str:
+        # Scenario 5: multi-intent + parallel work (update + history)
+        if new_email:
+            self._log_step(
+                "CustomerData",
+                "scenario5.update_customer",
+                {"customer_id": customer_id, "data": {"email": new_email}},
+            )
+        self._log_step("CustomerData", "scenario5.history", {"customer_id": customer_id})
+        self._log_step("Support", "scenario5.summarize_history", {"customer_id": customer_id})
+
         update_task = None
         if new_email:
             update_task = asyncio.create_task(
@@ -121,17 +131,25 @@ class RouterAgent:
         return f"Email updated to {email_val}. History: {summary}"
 
     async def _high_priority_report(self) -> str:
+        # Scenario 3: multi-step coordination (premium customers + high priority tickets)
+        self._log_step("CustomerData", "scenario3.list_customers", {"status": "active", "limit": 50})
         customers = (await self.data_agent.list_customers(status="active", limit=50)).result or []
+
         premium_ids = []
         for c in customers:
             if c["id"] == 12345 or c.get("status") == "vip":
                 premium_ids.append(c["id"])
         premium_ids = list(dict.fromkeys(premium_ids))  # preserve order, remove dupes
+
         if not premium_ids:
             return "No high-priority tickets found."
+
+        self._log_step("CustomerData", "scenario3.high_priority_tickets", {"customer_ids": premium_ids})
         tickets = await self.data_agent.high_priority_tickets(premium_ids)
+
         if not tickets:
             return "No high-priority tickets found."
+
         return "\n".join(
             f"Ticket {t['id']} for customer {t['customer_id']}: {t['issue']} ({t['status']})"
             for t in tickets
