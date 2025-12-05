@@ -13,10 +13,22 @@ from src.agents.support_agent import SupportAgent
 class RouterAgent:
     """Async orchestrator; only component that talks to the user."""
 
-    def __init__(self, mcp_server: MCPServer) -> None:
-        self.log = ConversationLog()
-        self.data_agent = CustomerDataAgent(mcp_server, self.log)
-        self.support_agent = SupportAgent(self.data_agent, self.log)
+    def __init__(
+        self,
+        mcp_server: MCPServer | None,
+        log: ConversationLog | None = None,
+        data_agent: CustomerDataAgent | None = None,
+        support_agent: SupportAgent | None = None,
+    ) -> None:
+        self.log = log or ConversationLog()
+        if data_agent and support_agent:
+            self.data_agent = data_agent
+            self.support_agent = support_agent
+        else:
+            if mcp_server is None:
+                raise ValueError("mcp_server is required when no agents are provided")
+            self.data_agent = CustomerDataAgent(mcp_server, self.log)
+            self.support_agent = SupportAgent(self.data_agent, self.log)
 
     def _parse_customer_id(self, query: str) -> Optional[int]:
         match = re.search(r"(?:id|customer)\s*(\d+)", query.lower())

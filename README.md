@@ -10,12 +10,37 @@ Minimal, runnable reference: FastMCP server over SQLite plus three coordinating 
 - `demo.py` — End-to-end runner that seeds the DB and executes the required scenarios.
 - `database_setup.py` — Provided helper (not used by the demo) kept for reference.
 
-## Setup & Run
- To run the multi-agent demo instead:
+## Setup
+1. Create and activate a virtual environment (optional but recommended):
    ```bash
-   python demo.py
+   python -m venv .venv
+   source .venv/bin/activate
    ```
+
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+## Running the legacy demo
+```bash
+python demo.py
+```
 The demo resets `mcp_server/support.db`, seeds sample data, runs the test scenarios, prints the customer-facing response plus the A2A log for each hop, and writes a transcript to `demos/output/run.log`.
+
+## A2A-spec HTTP services
+Three FastAPI/uvicorn services expose the agents as A2A-compatible HTTP endpoints:
+- Router: `python -m uvicorn services.router_server:app --host 0.0.0.0 --port 8010`
+- Customer Data: `python -m uvicorn services.customer_data_server:app --host 0.0.0.0 --port 8011`
+- Support: `python -m uvicorn services.support_server:app --host 0.0.0.0 --port 8012`
+
+Each service serves an Agent Card at `/.well-known/agent-card.json` and a JSON-RPC `message/send` handler at `/rpc`.
+
+## A2A spec demo
+Run the end-to-end A2A demo (starts all services, runs scenarios, and writes `demos/output/run_a2a_spec.log`):
+```bash
+python demos/run_a2a_spec_demo.py
+```
 
 ## MCP Server Tools
 All tools live in `mcp_server/server.py`, exposed via FastMCP over HTTP:
