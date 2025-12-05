@@ -1,0 +1,3 @@
+Building the MCP-backed multi-agent stack underscored how much smoother coordination becomes when tools are tightly scoped and deterministic. With FastMCP exposing a small set of validated endpoints, the router can confidently hand tasks to the data and support specialists without defensive branching, and the explicit `[A2A]` logs make every handoff debuggable.
+
+The async orchestration and transcript logging also highlighted the value of observability for multi-intent flows: running updates and history lookups in parallel keeps latency down while preserving a clear trace of who did what. Next steps would be swapping the keyword router for an intent classifier and putting the MCP server behind a real transport to mirror production conditions.
