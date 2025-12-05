@@ -29,7 +29,7 @@ SCENARIOS = [
     "I'm customer 12345 and need help upgrading my account",
     "Show me all active customers who have open tickets",
     "I've been charged twice, please refund immediately!",
-    "Update my email to new@email.com and show my ticket history",
+    "I'm customer 1. Update my email to new@email.com and show my ticket history",
 ]
 
 
