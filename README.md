@@ -11,13 +11,7 @@ Minimal, runnable reference: FastMCP server over SQLite plus three coordinating 
 - `database_setup.py` — Provided helper (not used by the demo) kept for reference.
 
 ## Setup & Run
-1. Python 3.11+ recommended.
-2. (Optional) Create a virtual environment and activate it.
-3. Start the MCP server (HTTP at `http://localhost:8000/mcp`):
-   ```bash
-   python mcp_server/server.py
-   ```
-4. To run the multi-agent demo instead:
+ To run the multi-agent demo instead:
    ```bash
    python demo.py
    ```
