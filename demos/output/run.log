@@ -1,46 +1,73 @@
+2025-12-04 22:28:21,087 [INFO] Initializing SQLite database at C:\Users\chris\multi-agent-customer-service\mcp_server\support.db
+2025-12-04 22:28:21,105 [INFO] Adding missing column to customers: phone TEXT
+2025-12-04 22:28:21,108 [INFO] Adding missing column to customers: updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+2025-12-04 22:28:21,116 [INFO] Inserted customer 5 (Customer Five, customer5@example.com, +1-555-0005)
+2025-12-04 22:28:21,117 [INFO] Inserted customer 12345 (Customer 12345, customer12345@example.com, +1-555-12345)
+2025-12-04 22:28:21,117 [INFO] Inserted high-priority open ticket 1 for customer 12345
+2025-12-04 22:28:21,117 [INFO] Active customer already has an open ticket (ticket id=1)
+
 === Scenario 1 ===
 Query: Get customer information for ID 5
+2025-12-04 22:28:21,126 [INFO] get_customer called with customer_id=5
 A2A Log:
 [A2A] from=Router to=CustomerData action=scenario1.route_to_data args={'customer_id': 5}
 [A2A] from=Router to=CustomerData action=get_customer args={'customer_id': 5}
-Answer: Customer not found.
+[A2A] from=Router to=Support action=scenario1.route_to_support args={'customer_id': 5}
+Answer: Customer 5: {'id': 5, 'name': 'Customer Five', 'email': 'customer5@example.com', 'phone': '+1-555-0005', 'status': 'active', 'created_at': '2025-12-05 03:28:21', 'updated_at': '2025-12-05 03:28:21'}
 
 === Scenario 2 ===
-Query: I'm customer 12345 and need help upgrading my account
+Query: I want to cancel my subscription but I'm having billing issues
+2025-12-04 22:28:21,128 [INFO] get_customer_history called with customer_id=1
 A2A Log:
-[A2A] from=Router to=CustomerData action=get_customer args={'customer_id': 12345}
-[A2A] from=Router to=Support action=scenario1.handle_support args={'issue': 'Upgrade request'}
-Answer: Support response for customer: Upgrade request.
+[A2A] from=Router to=Support action=scenario2.can_you_handle args={'issue': 'Cancel subscription with billing issues'}
+[A2A] from=Support to=Router action=scenario2.need_context args={'context': 'billing history'}
+[A2A] from=Router to=CustomerData action=get_customer_history args={'customer_id': 1}
+Answer: URGENT: Support response for customer: Cancel subscription with billing issues. Context: No prior billing tickets.
 
 === Scenario 3 ===
 Query: Show me all active customers who have open tickets
+2025-12-04 22:28:21,129 [INFO] list_customers called with status=active, limit=50
+2025-12-04 22:28:21,130 [INFO] get_customer_history called with customer_id=1
+2025-12-04 22:28:21,131 [INFO] get_customer_history called with customer_id=5
+2025-12-04 22:28:21,132 [INFO] get_customer_history called with customer_id=12345
 A2A Log:
 [A2A] from=Router to=CustomerData action=list_customers args={'status': 'active', 'limit': 50}
 [A2A] from=Router to=CustomerData action=get_customer_history args={'customer_id': 1}
-Answer: No open tickets for active customers.
+[A2A] from=Router to=CustomerData action=get_customer_history args={'customer_id': 5}
+[A2A] from=Router to=CustomerData action=get_customer_history args={'customer_id': 12345}
+Answer: customer_id=12345, ticket_id=1, issue=Seeded high-priority ticket, priority=high, status=open
 
 === Scenario 4 ===
 Query: I've been charged twice, please refund immediately!
+2025-12-04 22:28:21,134 [INFO] get_customer called with customer_id=1
+2025-12-04 22:28:21,135 [INFO] create_ticket called with customer_id=1 issue=Billing refund request (duplicate charge) priority=high
+2025-12-04 22:28:21,140 [INFO] get_customer_history called with customer_id=1
 A2A Log:
 [A2A] from=Router to=CustomerData action=get_customer args={'customer_id': 1}
 [A2A] from=Router to=Support action=scenario2.negotiate args={'issue': 'Billing refund'}
 [A2A] from=Support to=CustomerData action=create_ticket args={'customer_id': 1, 'issue': 'Billing refund request (duplicate charge)', 'priority': 'high'}
 [A2A] from=Support to=CustomerData action=request_context args={'customer_id': 1}
 [A2A] from=Support to=CustomerData action=get_customer_history args={'customer_id': 1}
-Answer: URGENT: Support response for Ana Customer (id=1): Billing refund. Context: [{'id': 1, 'customer_id': 1, 'issue': 'Billing refund request (duplicate charge)', 'status': 'open', 'priority': 'high', 'created_at': '2025-12-05 02:27:14'}] Ticket created: {'id': 1, 'customer_id': 1, 'issue': 'Billing refund request (duplicate charge)', 'status': 'open', 'priority': 'high', 'created_at': '2025-12-05 02:27:14'}
+Answer: URGENT: Support response for Ana Customer (id=1): Billing refund. Context: [{'id': 2, 'customer_id': 1, 'issue': 'Billing refund request (duplicate charge)', 'status': 'open', 'priority': 'high', 'created_at': '2025-12-05 03:28:21'}] Ticket created: {'id': 2, 'customer_id': 1, 'issue': 'Billing refund request (duplicate charge)', 'status': 'open', 'priority': 'high', 'created_at': '2025-12-05 03:28:21'}
 
 === Scenario 5 ===
 Query: Update my email to new@email.com
  and show my ticket history
+2025-12-04 22:28:21,142 [INFO] update_customer called with customer_id=1 data={'email': 'new@email.com'}
+2025-12-04 22:28:21,142 [INFO] get_customer_history called with customer_id=1
+2025-12-04 22:28:21,147 [INFO] get_customer called with customer_id=1
+2025-12-04 22:28:21,148 [INFO] get_customer_history called with customer_id=1
 A2A Log:
 [A2A] from=Router to=CustomerData action=update_customer args={'customer_id': 1, 'data': {'email': 'new@email.com'}}
 [A2A] from=Router to=CustomerData action=get_customer_history args={'customer_id': 1}
 [A2A] from=Support to=CustomerData action=get_customer_history args={'customer_id': 1}
-Answer: Email updated to new@email.com. History: [2025-12-05 02:27:14] Billing refund request (duplicate charge) (open, high)
+Answer: Email updated to new@email.com. History: [2025-12-05 03:28:21] Billing refund request (duplicate charge) (open, high)
 
 === Scenario 6 ===
 Query: What's the status of all high-priority tickets for premium customers?
+2025-12-04 22:28:21,150 [INFO] list_customers called with status=active, limit=50
+2025-12-04 22:28:21,151 [INFO] get_customer_history called with customer_id=12345
 A2A Log:
 [A2A] from=Router to=CustomerData action=list_customers args={'status': 'active', 'limit': 50}
-[A2A] from=Router to=CustomerData action=get_customer_history args={'customer_id': 1}
-Answer: Ticket 1 for customer 1: Billing refund request (duplicate charge) (open)
+[A2A] from=Router to=CustomerData action=get_customer_history args={'customer_id': 12345}
+Answer: Ticket 1 for customer 12345: Seeded high-priority ticket (open)

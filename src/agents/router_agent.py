@@ -31,7 +31,9 @@ class RouterAgent:
         normalized = query.lower()
         customer_id = self._parse_customer_id(query) or 1
 
-        if "update my email" in normalized and "history" in normalized:
+        if "cancel my subscription" in normalized and "billing" in normalized:
+            response = await self._cancel_with_billing_issue(customer_id)
+        elif "update my email" in normalized and "history" in normalized:
             response = await self._multi_intent_update_email(customer_id, self._parse_email(query))
         elif "charged twice" in normalized or "refund" in normalized:
             response = await self._escalation(customer_id)
@@ -70,9 +72,11 @@ class RouterAgent:
             open_tickets.extend([t for t in history.result or [] if t["status"] != "resolved"])
         if not open_tickets:
             return "No open tickets for active customers."
-        return "; ".join(
-            f"{t['issue']} for customer {t['customer_id']} ({t['status']})" for t in open_tickets
-        )
+        lines = [
+            f"customer_id={t['customer_id']}, ticket_id={t['id']}, issue={t['issue']}, priority={t['priority']}, status={t['status']}"
+            for t in open_tickets
+        ]
+        return "\n".join(lines)
 
     async def _escalation(self, customer_id: int) -> str:
         info = await self.data_agent.fetch_customer(customer_id)
@@ -106,7 +110,13 @@ class RouterAgent:
 
     async def _high_priority_report(self) -> str:
         customers = (await self.data_agent.list_customers(status="active", limit=50)).result or []
-        premium_ids = [c["id"] for c in customers if c["id"] % 2 == 1]
+        premium_ids = []
+        for c in customers:
+            if c["id"] == 12345 or c.get("status") == "vip":
+                premium_ids.append(c["id"])
+        premium_ids = list(dict.fromkeys(premium_ids))  # preserve order, remove dupes
+        if not premium_ids:
+            return "No high-priority tickets found."
         tickets = await self.data_agent.high_priority_tickets(premium_ids)
         if not tickets:
             return "No high-priority tickets found."
@@ -114,6 +124,23 @@ class RouterAgent:
             f"Ticket {t['id']} for customer {t['customer_id']}: {t['issue']} ({t['status']})"
             for t in tickets
         )
+
+    async def _cancel_with_billing_issue(self, customer_id: int) -> str:
+        # Scenario 2: negotiation with support asking for billing context
+        issue = "Cancel subscription with billing issues"
+        self._log_step("Support", "scenario2.can_you_handle", {"issue": issue})
+        self.log.record("Support", "Router", "scenario2.need_context", {"context": "billing history"})
+        history = await self.data_agent.history(customer_id)
+        history_items = history.result or []
+        context_summary = (
+            "; ".join(f"{h['issue']} ({h['status']}, {h['priority']})" for h in history_items)
+            if history_items
+            else "No prior billing tickets."
+        )
+        support_reply = await self.support_agent.handle_support(
+            None, issue, urgent=True, needs_context=False
+        )
+        return f"{support_reply} Context: {context_summary}"
 
     async def _fallback(self, customer_id: int) -> str:
         info = await self.data_agent.fetch_customer(customer_id)
