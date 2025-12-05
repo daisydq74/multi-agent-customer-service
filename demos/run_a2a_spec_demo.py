@@ -26,8 +26,10 @@ SERVICES: List[List[str]] = [
 
 SCENARIOS = [
     "Get customer information for ID 5",
-    "I want to cancel my subscription but I'm having billing issues",
-    "What's the status of all high-priority tickets for premium customers?",
+    "I'm customer 12345 and need help upgrading my account",
+    "Show me all active customers who have open tickets",
+    "I've been charged twice, please refund immediately!",
+    "Update my email to new@email.com and show my ticket history",
 ]
 
 
