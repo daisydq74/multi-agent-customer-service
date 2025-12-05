@@ -13,10 +13,22 @@ from src.agents.support_agent import SupportAgent
 class RouterAgent:
     """Async orchestrator; only component that talks to the user."""
 
-    def __init__(self, mcp_server: MCPServer) -> None:
-        self.log = ConversationLog()
-        self.data_agent = CustomerDataAgent(mcp_server, self.log)
-        self.support_agent = SupportAgent(self.data_agent, self.log)
+    def __init__(
+        self,
+        mcp_server: MCPServer | None,
+        log: ConversationLog | None = None,
+        data_agent: CustomerDataAgent | None = None,
+        support_agent: SupportAgent | None = None,
+    ) -> None:
+        self.log = log or ConversationLog()
+        if data_agent and support_agent:
+            self.data_agent = data_agent
+            self.support_agent = support_agent
+        else:
+            if mcp_server is None:
+                raise ValueError("mcp_server is required when no agents are provided")
+            self.data_agent = CustomerDataAgent(mcp_server, self.log)
+            self.support_agent = SupportAgent(self.data_agent, self.log)
 
     def _parse_customer_id(self, query: str) -> Optional[int]:
         match = re.search(r"(?:id|customer)\s*(\d+)", query.lower())
@@ -91,6 +103,16 @@ class RouterAgent:
         return f"{reply} Ticket created: {ticket}"
 
     async def _multi_intent_update_email(self, customer_id: int, new_email: Optional[str]) -> str:
+        # Scenario 5: multi-intent + parallel work (update + history)
+        if new_email:
+            self._log_step(
+                "CustomerData",
+                "scenario5.update_customer",
+                {"customer_id": customer_id, "data": {"email": new_email}},
+            )
+        self._log_step("CustomerData", "scenario5.history", {"customer_id": customer_id})
+        self._log_step("Support", "scenario5.summarize_history", {"customer_id": customer_id})
+
         update_task = None
         if new_email:
             update_task = asyncio.create_task(
@@ -109,17 +131,25 @@ class RouterAgent:
         return f"Email updated to {email_val}. History: {summary}"
 
     async def _high_priority_report(self) -> str:
+        # Scenario 3: multi-step coordination (premium customers + high priority tickets)
+        self._log_step("CustomerData", "scenario3.list_customers", {"status": "active", "limit": 50})
         customers = (await self.data_agent.list_customers(status="active", limit=50)).result or []
+
         premium_ids = []
         for c in customers:
             if c["id"] == 12345 or c.get("status") == "vip":
                 premium_ids.append(c["id"])
         premium_ids = list(dict.fromkeys(premium_ids))  # preserve order, remove dupes
+
         if not premium_ids:
             return "No high-priority tickets found."
+
+        self._log_step("CustomerData", "scenario3.high_priority_tickets", {"customer_ids": premium_ids})
         tickets = await self.data_agent.high_priority_tickets(premium_ids)
+
         if not tickets:
             return "No high-priority tickets found."
+
         return "\n".join(
             f"Ticket {t['id']} for customer {t['customer_id']}: {t['issue']} ({t['status']})"
             for t in tickets
