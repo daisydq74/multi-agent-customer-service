@@ -1,0 +1,44 @@
+INFO:     127.0.0.1:51209 - "GET /.well-known/agent-card.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51211 - "GET /.well-known/agent-card.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51213 - "POST /rpc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51219 - "GET /.well-known/agent-card.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51221 - "POST /rpc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51231 - "GET /.well-known/agent-card.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51233 - "POST /rpc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51243 - "GET /.well-known/agent-card.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51245 - "POST /rpc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51259 - "GET /.well-known/agent-card.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51261 - "POST /rpc HTTP/1.1" 200 OK
+
+Running A2A Spec Demo
+=====================
+
+Scenario 1: Get customer information for ID 5
+Response: Customer 5: {'id': 5, 'name': 'Customer Five', 'email': 'customer5@example.com', 'phone': '+1-555-0005', 'status': 'active', 'created_at': '2025-12-05 07:33:52', 'updated_at': '2025-12-05 07:33:52'}
+A2A Log:
+ [A2A] from=Router to=CustomerData action=scenario1.route_to_data args={'customer_id': 5}
+[A2A] from=Router to=Support action=scenario1.route_to_support args={'customer_id': 5}
+
+Scenario 2: I want to cancel my subscription but I'm having billing issues
+Response: URGENT: Support response for customer: Cancel subscription with billing issues. Context: No prior billing tickets.
+A2A Log:
+ [A2A] from=Router to=Support action=scenario2.can_you_handle args={'issue': 'Cancel subscription with billing issues'}
+[A2A] from=Support to=Router action=scenario2.need_context args={'context': 'billing history'}
+
+Scenario 3: What's the status of all high-priority tickets for premium customers?
+Response: Ticket 1 for customer 12345: Seeded high-priority ticket (open)
+A2A Log:
+ [A2A] from=Router to=CustomerData action=scenario3.list_customers args={'status': 'active', 'limit': 50}
+[A2A] from=Router to=CustomerData action=scenario3.high_priority_tickets args={'customer_ids': [12345]}
+
+Scenario 4: I've been charged twice, please refund immediately!
+Response: URGENT: Support response for Ana Customer (id=1): Billing refund. Context: [{'id': 2, 'customer_id': 1, 'issue': 'Billing refund request (duplicate charge)', 'status': 'open', 'priority': 'high', 'created_at': '2025-12-05 07:33:53'}] Ticket created: {'id': 2, 'customer_id': 1, 'issue': 'Billing refund request (duplicate charge)', 'status': 'open', 'priority': 'high', 'created_at': '2025-12-05 07:33:53'}
+A2A Log:
+ [A2A] from=Router to=Support action=scenario2.negotiate args={'issue': 'Billing refund'}
+
+Scenario 5: Update my email to new@email.com and show my ticket history
+Response: Email updated to new@email.com. History: [2025-12-05 07:33:53] Billing refund request (duplicate charge) (open, high)
+A2A Log:
+ [A2A] from=Router to=CustomerData action=scenario5.update_customer args={'customer_id': 1, 'data': {'email': 'new@email.com'}}
+[A2A] from=Router to=CustomerData action=scenario5.history args={'customer_id': 1}
+[A2A] from=Router to=Support action=scenario5.summarize_history args={'customer_id': 1}
