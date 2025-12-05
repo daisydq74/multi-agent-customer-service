@@ -18,5 +18,7 @@ Verify:
 4) End-to-end demo: python program or notebook runs and shows >=3 A2A coordination scenarios, with output saved (e.g., run.log).
 5) README: venv setup, requirements.txt, run instructions.
 6) Error handling: tool failures/timeouts, DB reset, logging observability.
+7) Conclusion deliverable: include a 1–2 paragraph reflection (CONCLUSION.md or README section).
+
 
 If anything fails, propose minimal changes.
