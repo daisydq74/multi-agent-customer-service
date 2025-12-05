@@ -77,7 +77,12 @@ class RouterAgent:
     def _scenario_escalation(self, customer_id: Optional[int]) -> str:
         cid = customer_id or 2
         customer = self.data_agent.fetch_customer(cid).result
-        self.log.record("router", "support-agent", "Escalate billing refund request")
+        self.log.record(
+            "router",
+            "support-agent",
+            "escalate_billing_refund",
+            {"customer_id": cid, "issue": "duplicate charge"},
+        )
         ticket = self.support_agent.ensure_ticket(
             cid, issue="Billing refund request (duplicate charge)", priority="high"
         )
