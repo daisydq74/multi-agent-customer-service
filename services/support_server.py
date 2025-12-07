@@ -46,6 +46,10 @@ async def _handle_command(command: str, args: Dict[str, Any]) -> Dict[str, Any]:
     if command == "summarize_history":
         summary = await support_agent.summarize_history(int(args.get("customer_id", 0)))
         return {"result": summary, "error": None}
+    if command == "draft_response":
+        context = args.get("context", {})
+        reply = await support_agent.draft_response(context if isinstance(context, dict) else {})
+        return {"result": reply, "error": None}
     raise ValueError(f"Unknown command: {command}")
 
 

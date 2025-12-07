@@ -132,6 +132,12 @@ class SupportProxy:
         )
         return payload.get("result", "")
 
+    async def draft_response(self, context: Dict[str, Any]) -> str:
+        payload = await self.client.send_message(
+            {"command": "draft_response", "args": {"context": context}}
+        )
+        return payload.get("result", "")
+
 
 router_agent = RouterAgent(
     None,
