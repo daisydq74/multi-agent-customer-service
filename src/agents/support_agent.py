@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, Optional
+import os
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from src.agents.base import ConversationLog
 from src.agents.customer_data_agent import CustomerDataAgent
+
+if TYPE_CHECKING:
+    from src.llm.openai_support_llm import OpenAISupportLLM
 
 
 class SupportAgent:
@@ -14,6 +18,17 @@ class SupportAgent:
         self.data_agent = data_agent
         self.log = log
         self.name = "Support"
+        self._llm = self._maybe_init_llm()
+
+    def _maybe_init_llm(self) -> Optional["OpenAISupportLLM"]:
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            return None
+        from src.llm.openai_support_llm import OpenAISupportLLM
+        try:
+            return OpenAISupportLLM()
+        except Exception:
+            return None
 
     async def handle_support(
         self,
@@ -21,7 +36,7 @@ class SupportAgent:
         issue: str,
         urgent: bool = False,
         needs_context: bool = False,
-    ) -> str:
+        ) -> str:
         if needs_context and customer:
             self.log.record(
                 self.name, "CustomerData", "request_context", {"customer_id": customer["id"]}
@@ -32,7 +47,25 @@ class SupportAgent:
             context_note = ""
         prefix = "URGENT: " if urgent else ""
         label = f"{customer['name']} (id={customer['id']})" if customer else "customer"
-        return f"{prefix}Support response for {label}: {issue}.{context_note}"
+        rule_based = f"{prefix}Support response for {label}: {issue}.{context_note}"
+
+        if not self._llm:
+            return rule_based
+
+        context_block = context_note.strip() if context_note else "No prior context provided."
+        customer_summary = (
+            f"{label}; email={customer.get('email')} status={customer.get('status')}"
+            if customer
+            else "Unknown customer"
+        )
+        prompt_issue = f"{prefix}{issue}"
+        try:
+            return self._llm.generate(
+                user_text=f"Issue: {prompt_issue} | Customer: {customer_summary}",
+                context=context_block,
+            )
+        except Exception:
+            return rule_based
 
     async def ensure_ticket(self, customer_id: int, issue: str, priority: str = "medium") -> Dict[str, Any]:
         result = await self.data_agent.create_ticket(
