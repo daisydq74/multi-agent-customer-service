@@ -3,53 +3,19 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import List
 
 from mcp_server.ensure_seed_data import ensure_required_records
 from mcp_server.server import DB_PATH, MCPServer, reset_database
 from src.agents.router_agent import RouterAgent
 
-SCENARIOS: List[Dict[str, Any]] = [
-    {
-        "query": "Get customer information for ID 5",
-        "plan": [
-            {"agent": "customer_data", "action": "get_customer", "args": {"customer_id": 5}},
-            {"agent": "support", "action": "handle_support", "args": {"issue": "General inquiry"}},
-        ],
-    },
-    {
-        "query": "Update my email to demo@example.com and show my ticket history",
-        "plan": [
-            {
-                "agent": "customer_data",
-                "action": "update_customer",
-                "args": {"customer_id": 1, "data": {"email": "demo@example.com"}},
-            },
-            {"agent": "customer_data", "action": "get_customer_history", "args": {"customer_id": 1}},
-            {"agent": "support", "action": "summarize_history", "args": {"customer_id": 1}},
-        ],
-    },
-    {
-        "query": "Show active customers with any open tickets",
-        "plan": [
-            {
-                "agent": "customer_data",
-                "action": "list_customers_with_open_tickets",
-                "args": {"status": "active"},
-            },
-            {
-                "agent": "support",
-                "action": "draft_response",
-                "args": {"input": "Summarize open tickets per active customer"},
-            },
-        ],
-    },
+SCENARIOS: List[str] = [
+    "Get customer information for ID 5",
+    "I'm customer 12345 and need help upgrading my account",
+    "Show me all active customers who have open tickets",
+    "I've been charged twice, please refund immediately!",
+    "Update my email to new@email.com and show my ticket history",
 ]
-
-
-async def _print_plan(plan: List[Dict[str, Any]]) -> None:
-    for step in plan:
-        print(f"- {step['agent']}.{step['action']} args={json.dumps(step['args'])}")
 
 
 async def run_demo() -> None:
@@ -63,31 +29,18 @@ async def run_demo() -> None:
     transcript_path.parent.mkdir(parents=True, exist_ok=True)
     transcript_lines: List[str] = []
 
-    for scenario in SCENARIOS:
-        query = scenario["query"]
-        plan = scenario["plan"]
+    for query in SCENARIOS:
         print(f"\n=== Query: {query} ===")
-        print("Planned actions:")
-        await _print_plan(plan)
-
-        if any(step["action"] == "list_customers_with_open_tickets" for step in plan):
-            preview = await router.data_agent.list_customers_with_open_tickets(status="active")
-            print("Open ticket preview:")
-            print(json.dumps(preview.result, indent=2))
-
         result = await router.handle(query)
+        print("Router plan:")
+        print(json.dumps(result["plan"], indent=2))
         print("A2A Log:")
         print(result["log"])
         print("Answer:", result["response"])
 
         transcript_lines.append(f"Query: {query}")
         transcript_lines.append("Plan:")
-        transcript_lines.extend(
-            f"- {step['agent']}.{step['action']} args={json.dumps(step['args'])}" for step in plan
-        )
-        if any(step["action"] == "list_customers_with_open_tickets" for step in plan):
-            transcript_lines.append("Preview:")
-            transcript_lines.append(json.dumps(preview.result, indent=2))
+        transcript_lines.append(json.dumps(result["plan"], indent=2))
         transcript_lines.append("A2A Log:")
         transcript_lines.append(result["log"])
         transcript_lines.append(f"Answer: {result['response']}")

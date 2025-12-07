@@ -25,6 +25,9 @@ class CustomerDataAgent:
         self.log.record(sender, self.name, "get_customer", {"customer_id": customer_id})
         return await asyncio.to_thread(self.server.get_customer, customer_id)
 
+    async def get_customer(self, customer_id: int, sender: str = "Router") -> ToolResult:
+        return await self.fetch_customer(customer_id, sender=sender)
+
     async def list_customers(
         self, status: Optional[str] = None, limit: int = 10, sender: str = "Router"
     ) -> ToolResult:

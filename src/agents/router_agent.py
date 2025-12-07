@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from mcp_server.server import MCPServer
 from src.agents.base import ConversationLog
@@ -21,6 +21,15 @@ class RouterAgent:
         support_agent: SupportAgent | None = None,
     ) -> None:
         self.log = log or ConversationLog()
+        self.system_prompt: str = """
+You are the RouterAgent. Plan steps using only the allowed tools below.
+- customer_data: get_customer, list_customers, list_customers_with_open_tickets, update_customer, create_ticket, get_customer_history
+- support: draft_response
+Rules:
+- If the query asks for active customers with open tickets, use list_customers_with_open_tickets(status="active").
+- For refund/charged twice/urgent language, mark urgency="high" and route to support.
+- If an action needs a customer_id but none is provided, ask SupportAgent to request the missing identifier instead of inventing one.
+"""
         if data_agent and support_agent:
             self.data_agent = data_agent
             self.support_agent = support_agent
@@ -31,18 +40,236 @@ class RouterAgent:
             self.support_agent = SupportAgent(self.data_agent, self.log)
         self.llm_planning_allowlist: Dict[str, Dict[str, Any]] = {
             "customer_data": {
-                "fetch_customer": {"args": {"customer_id": "int"}},
+                "get_customer": {"args": {"customer_id": "int"}},
                 "list_customers": {"args": {"status": "str|None", "limit": "int"}},
                 "list_customers_with_open_tickets": {"args": {"status": "str"}},
                 "update_customer": {"args": {"customer_id": "int", "data": "dict"}},
+                "create_ticket": {"args": {"customer_id": "int", "issue": "str", "priority": "str"}},
                 "get_customer_history": {"args": {"customer_id": "int"}},
             },
             "support": {
-                "handle_support": {"args": {"customer": "dict|None", "issue": "str"}},
-                "summarize_history": {"args": {"customer_id": "int"}},
-                "ensure_ticket": {"args": {"customer_id": "int", "issue": "str", "priority": "str"}},
+                "draft_response": {
+                    "args": {
+                        "intent": "str",
+                        "tone": "str",
+                        "urgency": "str",
+                        "customer_id": "int|None",
+                        "notes": "str|None",
+                    }
+                },
             },
         }
+        self.last_plan: List[Dict[str, Any]] = []
+
+    async def handle(self, query: str) -> Dict[str, Any]:
+        self.log.clear()
+        self.last_plan = []
+        normalized = query.lower()
+        customer_id = self._parse_customer_id(query)
+
+        if "get customer information" in normalized:
+            self._set_plan(
+                [
+                    {"agent": "customer_data", "action": "get_customer", "args": {"customer_id": customer_id}},
+                    {
+                        "agent": "support",
+                        "action": "draft_response",
+                        "args": {"intent": "customer_info", "tone": "concise", "urgency": "normal"},
+                    },
+                ]
+            )
+            response = await self._simple_customer_info(customer_id)
+        elif "upgrade" in normalized:
+            self._set_plan(
+                [
+                    {"agent": "customer_data", "action": "get_customer", "args": {"customer_id": customer_id}},
+                    {
+                        "agent": "customer_data",
+                        "action": "get_customer_history",
+                        "args": {"customer_id": customer_id, "optional": True},
+                    },
+                    {
+                        "agent": "support",
+                        "action": "draft_response",
+                        "args": {"intent": "upgrade", "tone": "helpful", "urgency": "normal"},
+                    },
+                ]
+            )
+            response = await self._upgrade(customer_id)
+        elif "active customers" in normalized and "open tickets" in normalized:
+            self._set_plan(
+                [
+                    {
+                        "agent": "customer_data",
+                        "action": "list_customers_with_open_tickets",
+                        "args": {"status": "active"},
+                    },
+                    {
+                        "agent": "support",
+                        "action": "draft_response",
+                        "args": {"intent": "list_open_tickets", "tone": "helpful", "urgency": "normal"},
+                    },
+                ]
+            )
+            response = await self._active_with_open_tickets()
+        elif "charged twice" in normalized or "refund" in normalized:
+            self._set_plan(
+                [
+                    {
+                        "agent": "support",
+                        "action": "draft_response",
+                        "args": {
+                            "intent": "refund",
+                            "tone": "calm",
+                            "urgency": "high",
+                            "customer_id": customer_id,
+                            "notes": "billing escalation",
+                        },
+                    }
+                ]
+            )
+            response = await self._escalation(customer_id)
+        elif "update my email" in normalized and "ticket history" in normalized:
+            self._set_plan(
+                [
+                    {
+                        "agent": "customer_data",
+                        "action": "update_customer",
+                        "args": {"customer_id": customer_id, "data": {"email": self._parse_email(query)}},
+                    },
+                    {
+                        "agent": "customer_data",
+                        "action": "get_customer_history",
+                        "args": {"customer_id": customer_id},
+                    },
+                    {
+                        "agent": "support",
+                        "action": "draft_response",
+                        "args": {
+                            "intent": "multi_intent_update_history",
+                            "tone": "helpful",
+                            "urgency": "normal",
+                            "customer_id": customer_id,
+                        },
+                    },
+                ]
+            )
+            response = await self._multi_intent_update_email(customer_id, self._parse_email(query))
+        else:
+            response = await self._fallback(customer_id)
+
+        return {"response": response, "log": self.log.dump(), "plan": self.last_plan}
+
+    async def _simple_customer_info(self, customer_id: Optional[int]) -> str:
+        if customer_id is None:
+            await self.support_agent.draft_response(
+                intent="customer_info",
+                tone="concise",
+                urgency="normal",
+                notes="customer_id required",
+            )
+            return "Please provide a customer ID so I can pull the account details."
+
+        result = await self.data_agent.fetch_customer(customer_id)
+        if result.error or not result.result:
+            await self.support_agent.draft_response(
+                intent="customer_info",
+                tone="concise",
+                urgency="normal",
+                notes="not found",
+                customer=result.result,
+            )
+            return "Customer not found."
+
+        return await self.support_agent.draft_response(
+            intent="customer_info",
+            tone="concise",
+            urgency="normal",
+            customer=result.result,
+        )
+
+    async def _upgrade(self, customer_id: Optional[int]) -> str:
+        if customer_id is None:
+            return await self.support_agent.draft_response(
+                intent="upgrade",
+                tone="helpful",
+                urgency="normal",
+                notes="missing customer id",
+            )
+
+        info = await self.data_agent.fetch_customer(customer_id)
+        history = await self.data_agent.history(customer_id)
+        return await self.support_agent.draft_response(
+            intent="upgrade",
+            tone="helpful",
+            urgency="normal",
+            customer=info.result,
+            data={"history": history.result},
+        )
+
+    async def _active_with_open_tickets(self) -> str:
+        result = await self.data_agent.list_customers_with_open_tickets(status="active")
+        return await self.support_agent.draft_response(
+            intent="list_open_tickets",
+            tone="helpful",
+            urgency="normal",
+            data=result.result,
+            notes="active customers only",
+        )
+
+    async def _escalation(self, customer_id: Optional[int]) -> str:
+        customer_details = None
+        if customer_id is not None:
+            lookup = await self.data_agent.fetch_customer(customer_id)
+            customer_details = lookup.result
+        return await self.support_agent.draft_response(
+            intent="refund",
+            tone="calm",
+            urgency="high",
+            customer=customer_details,
+        )
+
+    async def _multi_intent_update_email(
+        self, customer_id: Optional[int], new_email: Optional[str]
+    ) -> str:
+        if customer_id is None:
+            return await self.support_agent.draft_response(
+                intent="multi_intent_update_history",
+                tone="helpful",
+                urgency="normal",
+                notes="missing customer id",
+            )
+
+        update_task = None
+        if new_email:
+            update_task = asyncio.create_task(
+                self.data_agent.update_customer(customer_id, {"email": new_email})
+            )
+        history_task = asyncio.create_task(self.data_agent.history(customer_id))
+
+        updated = await update_task if update_task else None
+        history = await history_task
+        return await self.support_agent.draft_response(
+            intent="multi_intent_update_history",
+            tone="helpful",
+            urgency="normal",
+            customer={"id": customer_id},
+            data={"updated": updated.result if updated else None, "history": history.result},
+            notes="completed" if updated else "history only",
+        )
+
+    async def _fallback(self, customer_id: Optional[int]) -> str:
+        customer = None
+        if customer_id is not None:
+            info = await self.data_agent.fetch_customer(customer_id)
+            customer = info.result
+        return await self.support_agent.draft_response(
+            intent="general",
+            tone="helpful",
+            urgency="normal",
+            customer=customer,
+            notes="fallback",
+        )
 
     def _parse_customer_id(self, query: str) -> Optional[int]:
         match = re.search(r"(?:id|customer)\s*(\d+)", query.lower())
@@ -52,152 +279,5 @@ class RouterAgent:
         match = re.search(r"[\w\.\-]+@[\w\-]+\.[\w\-]+", query)
         return match.group(0) if match else None
 
-    async def handle(self, query: str) -> Dict[str, str]:
-        self.log.clear()
-        normalized = query.lower()
-        customer_id = self._parse_customer_id(query) or 1
-
-        if "cancel my subscription" in normalized and "billing" in normalized:
-            response = await self._cancel_with_billing_issue(customer_id)
-        elif "update my email" in normalized and "history" in normalized:
-            response = await self._multi_intent_update_email(customer_id, self._parse_email(query))
-        elif "charged twice" in normalized or "refund" in normalized:
-            response = await self._escalation(customer_id)
-        elif "high-priority tickets" in normalized:
-            response = await self._high_priority_report()
-        elif "open tickets" in normalized and "active customers" in normalized:
-            response = await self._active_with_open_tickets()
-        elif "upgrade" in normalized or "upgrad" in normalized:
-            response = await self._upgrade(customer_id)
-        elif "get customer information" in normalized or "customer information" in normalized:
-            response = await self._get_customer(customer_id)
-        else:
-            response = await self._fallback(customer_id)
-
-        return {"response": response, "log": self.log.dump()}
-
-    async def _get_customer(self, customer_id: int) -> str:
-        # Scenario 1: task allocation (Router -> Data -> Support optional)
-        self._log_step("CustomerData", "scenario1.route_to_data", {"customer_id": customer_id})
-        result = await self.data_agent.fetch_customer(customer_id)
-        if result.error or not result.result:
-            return "Customer not found."
-        self._log_step("Support", "scenario1.route_to_support", {"customer_id": customer_id})
-        return f"Customer {customer_id}: {result.result}"
-
-    async def _upgrade(self, customer_id: int) -> str:
-        info = await self.data_agent.fetch_customer(customer_id)
-        self._log_step("Support", "scenario1.handle_support", {"issue": "Upgrade request"})
-        return await self.support_agent.handle_support(info.result, "Upgrade request", urgent=False)
-
-    async def _active_with_open_tickets(self) -> str:
-        result = await self.data_agent.list_customers_with_open_tickets(status="active")
-        if result.error:
-            return f"Error fetching open tickets: {result.error}"
-
-        payload = result.result or {}
-        customers = payload.get("customers", [])
-        if not customers:
-            return "No open tickets for active customers."
-
-        lines = []
-        for cust in customers:
-            tickets = cust.get("open_tickets", [])
-            ticket_summaries = "; ".join(
-                f"ticket {t['ticket_id']} ({t['priority']}): {t['issue']} [{t['status']}]"
-                for t in tickets
-            )
-            lines.append(
-                f"{cust['name']} (id={cust['customer_id']}, status={cust.get('status', 'unknown')}): {ticket_summaries}"
-            )
-        return "\n".join(lines)
-
-    async def _escalation(self, customer_id: int) -> str:
-        info = await self.data_agent.fetch_customer(customer_id)
-        # Scenario 2: negotiation/escalation with context request
-        self._log_step("Support", "scenario2.negotiate", {"issue": "Billing refund"})
-        ticket = await self.support_agent.ensure_ticket(
-            customer_id, "Billing refund request (duplicate charge)", priority="high"
-        )
-        reply = await self.support_agent.handle_support(
-            info.result, "Billing refund", urgent=True, needs_context=True
-        )
-        return f"{reply} Ticket created: {ticket}"
-
-    async def _multi_intent_update_email(self, customer_id: int, new_email: Optional[str]) -> str:
-        # Scenario 5: multi-intent + parallel work (update + history)
-        if new_email:
-            self._log_step(
-                "CustomerData",
-                "scenario5.update_customer",
-                {"customer_id": customer_id, "data": {"email": new_email}},
-            )
-        self._log_step("CustomerData", "scenario5.history", {"customer_id": customer_id})
-        self._log_step("Support", "scenario5.summarize_history", {"customer_id": customer_id})
-
-        update_task = None
-        if new_email:
-            update_task = asyncio.create_task(
-                self.data_agent.update_customer(customer_id, {"email": new_email})
-            )
-        history_task = asyncio.create_task(self.data_agent.history(customer_id))
-
-        if update_task:
-            updated, history = await asyncio.gather(update_task, history_task)
-        else:
-            updated = None
-            history = await history_task
-
-        email_val = updated.result["email"] if updated and updated.result else "unchanged"
-        summary = await self.support_agent.summarize_history(customer_id)
-        return f"Email updated to {email_val}. History: {summary}"
-
-    async def _high_priority_report(self) -> str:
-        # Scenario 3: multi-step coordination (premium customers + high priority tickets)
-        self._log_step("CustomerData", "scenario3.list_customers", {"status": "active", "limit": 50})
-        customers = (await self.data_agent.list_customers(status="active", limit=50)).result or []
-
-        premium_ids = []
-        for c in customers:
-            if c["id"] == 12345 or c.get("status") == "vip":
-                premium_ids.append(c["id"])
-        premium_ids = list(dict.fromkeys(premium_ids))  # preserve order, remove dupes
-
-        if not premium_ids:
-            return "No high-priority tickets found."
-
-        self._log_step("CustomerData", "scenario3.high_priority_tickets", {"customer_ids": premium_ids})
-        tickets = await self.data_agent.high_priority_tickets(premium_ids)
-
-        if not tickets:
-            return "No high-priority tickets found."
-
-        return "\n".join(
-            f"Ticket {t['id']} for customer {t['customer_id']}: {t['issue']} ({t['status']})"
-            for t in tickets
-        )
-
-    async def _cancel_with_billing_issue(self, customer_id: int) -> str:
-        # Scenario 2: negotiation with support asking for billing context
-        issue = "Cancel subscription with billing issues"
-        self._log_step("Support", "scenario2.can_you_handle", {"issue": issue})
-        self.log.record("Support", "Router", "scenario2.need_context", {"context": "billing history"})
-        history = await self.data_agent.history(customer_id)
-        history_items = history.result or []
-        context_summary = (
-            "; ".join(f"{h['issue']} ({h['status']}, {h['priority']})" for h in history_items)
-            if history_items
-            else "No prior billing tickets."
-        )
-        support_reply = await self.support_agent.handle_support(
-            None, issue, urgent=True, needs_context=False
-        )
-        return f"{support_reply} Context: {context_summary}"
-
-    async def _fallback(self, customer_id: int) -> str:
-        info = await self.data_agent.fetch_customer(customer_id)
-        self._log_step("Support", "scenario_generic.handle_support", {"issue": "General inquiry"})
-        return await self.support_agent.handle_support(info.result, "General inquiry", urgent=False)
-
-    def _log_step(self, receiver: str, action: str, args: Dict[str, object]) -> None:
-        self.log.record("Router", receiver, action, args)
+    def _set_plan(self, steps: List[Dict[str, Any]]) -> None:
+        self.last_plan = steps
