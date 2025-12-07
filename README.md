@@ -49,6 +49,7 @@ All tools live in `mcp_server/server.py`, exposed via FastMCP over HTTP:
 - `update_customer(customer_id, data)` (validates allowed fields)
 - `create_ticket(customer_id, issue, priority)`
 - `get_customer_history(customer_id)`
+- `list_customers_with_open_tickets(status)`
 
 ## Agents & Coordination
 - Router allocates requests, negotiates escalation, and sequences multi-step work.

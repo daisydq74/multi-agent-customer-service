@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import dataclasses
 import logging
 import sqlite3
@@ -257,6 +255,73 @@ def get_customer_history(customer_id: int) -> List[Dict[str, Any]]:
         raise
 
 
+@mcp.tool()
+def list_customers_with_open_tickets(status: str = "active") -> Dict[str, Any]:
+    """Return customers with the given status who have at least one open ticket."""
+
+    logger.info("list_customers_with_open_tickets called with status=%s", status)
+    ensure_database()
+    try:
+        _validate_status(status)
+        with get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    c.id AS customer_id,
+                    c.name,
+                    c.email,
+                    c.phone,
+                    c.status,
+                    c.created_at AS customer_created_at,
+                    c.updated_at AS customer_updated_at,
+                    t.id AS ticket_id,
+                    t.issue,
+                    t.priority,
+                    t.created_at AS ticket_created_at,
+                    t.status AS ticket_status
+                FROM customers c
+                JOIN tickets t ON c.id = t.customer_id
+                WHERE c.status = ? AND t.status = 'open'
+                ORDER BY c.id, t.created_at DESC, t.id
+                """,
+                (status,),
+            ).fetchall()
+
+        if not rows:
+            return {"count": 0, "customers": []}
+
+        grouped: Dict[int, Dict[str, Any]] = {}
+        for row in rows:
+            customer_id = row["customer_id"]
+            if customer_id not in grouped:
+                grouped[customer_id] = {
+                    "customer_id": customer_id,
+                    "name": row["name"],
+                    "email": row["email"],
+                    "phone": row["phone"],
+                    "status": row["status"],
+                    "created_at": row["customer_created_at"],
+                    "updated_at": row["customer_updated_at"],
+                    "open_tickets": [],
+                }
+
+            grouped[customer_id]["open_tickets"].append(
+                {
+                    "ticket_id": row["ticket_id"],
+                    "issue": row["issue"],
+                    "priority": row["priority"],
+                    "created_at": row["ticket_created_at"],
+                    "status": row["ticket_status"],
+                }
+            )
+
+        customers = list(grouped.values())
+        return {"count": len(customers), "customers": customers}
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("list_customers_with_open_tickets failed: %s", exc)
+        raise
+
+
 class MCPServer:
     """
     Lightweight compatibility layer so local agents/demo can call tools
@@ -277,6 +342,15 @@ class MCPServer:
         call = ToolCall("list_customers", {"status": status, "limit": limit})
         try:
             return ToolResult(call, result=list_customers(status=status, limit=limit))
+        except Exception as exc:
+            return ToolResult(call, result=None, error=str(exc))
+
+    def list_customers_with_open_tickets(self, status: str = "active") -> ToolResult:
+        call = ToolCall("list_customers_with_open_tickets", {"status": status})
+        try:
+            return ToolResult(
+                call, result=list_customers_with_open_tickets(status=status)
+            )
         except Exception as exc:
             return ToolResult(call, result=None, error=str(exc))
 

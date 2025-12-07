@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from mcp_server.server import MCPServer
 from src.agents.base import ConversationLog
@@ -29,6 +29,20 @@ class RouterAgent:
                 raise ValueError("mcp_server is required when no agents are provided")
             self.data_agent = CustomerDataAgent(mcp_server, self.log)
             self.support_agent = SupportAgent(self.data_agent, self.log)
+        self.llm_planning_allowlist: Dict[str, Dict[str, Any]] = {
+            "customer_data": {
+                "fetch_customer": {"args": {"customer_id": "int"}},
+                "list_customers": {"args": {"status": "str|None", "limit": "int"}},
+                "list_customers_with_open_tickets": {"args": {"status": "str"}},
+                "update_customer": {"args": {"customer_id": "int", "data": "dict"}},
+                "get_customer_history": {"args": {"customer_id": "int"}},
+            },
+            "support": {
+                "handle_support": {"args": {"customer": "dict|None", "issue": "str"}},
+                "summarize_history": {"args": {"customer_id": "int"}},
+                "ensure_ticket": {"args": {"customer_id": "int", "issue": "str", "priority": "str"}},
+            },
+        }
 
     def _parse_customer_id(self, query: str) -> Optional[int]:
         match = re.search(r"(?:id|customer)\s*(\d+)", query.lower())
@@ -77,17 +91,25 @@ class RouterAgent:
         return await self.support_agent.handle_support(info.result, "Upgrade request", urgent=False)
 
     async def _active_with_open_tickets(self) -> str:
-        customers = (await self.data_agent.list_customers(status="active", limit=50)).result
-        open_tickets = []
-        for cust in customers or []:
-            history = await self.data_agent.history(cust["id"])
-            open_tickets.extend([t for t in history.result or [] if t["status"] != "resolved"])
-        if not open_tickets:
+        result = await self.data_agent.list_customers_with_open_tickets(status="active")
+        if result.error:
+            return f"Error fetching open tickets: {result.error}"
+
+        payload = result.result or {}
+        customers = payload.get("customers", [])
+        if not customers:
             return "No open tickets for active customers."
-        lines = [
-            f"customer_id={t['customer_id']}, ticket_id={t['id']}, issue={t['issue']}, priority={t['priority']}, status={t['status']}"
-            for t in open_tickets
-        ]
+
+        lines = []
+        for cust in customers:
+            tickets = cust.get("open_tickets", [])
+            ticket_summaries = "; ".join(
+                f"ticket {t['ticket_id']} ({t['priority']}): {t['issue']} [{t['status']}]"
+                for t in tickets
+            )
+            lines.append(
+                f"{cust['name']} (id={cust['customer_id']}, status={cust.get('status', 'unknown')}): {ticket_summaries}"
+            )
         return "\n".join(lines)
 
     async def _escalation(self, customer_id: int) -> str:

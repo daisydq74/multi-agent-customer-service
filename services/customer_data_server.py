@@ -42,6 +42,12 @@ async def _handle_command(command: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 args.get("status"), int(args.get("limit", 10)), sender=args.get("sender", "Router")
             )
         )
+    if command == "list_customers_with_open_tickets":
+        return _serialize_tool_result(
+            await data_agent.list_customers_with_open_tickets(
+                args.get("status", "active"), sender=args.get("sender", "Router")
+            )
+        )
     if command == "update_customer":
         return _serialize_tool_result(
             await data_agent.update_customer(

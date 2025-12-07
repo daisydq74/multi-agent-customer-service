@@ -55,6 +55,17 @@ class CustomerDataProxy:
         )
         return RemoteToolResult(result=payload.get("result"), error=payload.get("error"))
 
+    async def list_customers_with_open_tickets(
+        self, status: str = "active", sender: str = "Router"
+    ) -> RemoteToolResult:
+        payload = await self.client.send_message(
+            {
+                "command": "list_customers_with_open_tickets",
+                "args": {"status": status, "sender": sender},
+            }
+        )
+        return RemoteToolResult(result=payload.get("result"), error=payload.get("error"))
+
     async def update_customer(self, customer_id: int, data: Dict[str, Any], sender: str = "Router") -> RemoteToolResult:
         payload = await self.client.send_message(
             {

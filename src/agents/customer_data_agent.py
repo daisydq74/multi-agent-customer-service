@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 from typing import Any, Dict, List, Optional
 
@@ -14,6 +12,14 @@ class CustomerDataAgent:
         self.server = mcp_server
         self.log = log
         self.name = "CustomerData"
+        self.llm_tool_allowlist: Dict[str, Dict[str, Any]] = {
+            "get_customer": {"args": {"customer_id": "int"}},
+            "list_customers": {"args": {"status": "str|None", "limit": "int"}},
+            "list_customers_with_open_tickets": {"args": {"status": "str"}},
+            "update_customer": {"args": {"customer_id": "int", "data": "dict"}},
+            "create_ticket": {"args": {"customer_id": "int", "issue": "str", "priority": "str"}},
+            "get_customer_history": {"args": {"customer_id": "int"}},
+        }
 
     async def fetch_customer(self, customer_id: int, sender: str = "Router") -> ToolResult:
         self.log.record(sender, self.name, "get_customer", {"customer_id": customer_id})
@@ -53,3 +59,14 @@ class CustomerDataAgent:
             if history.result:
                 tickets.extend([t for t in history.result if t.get("priority") == "high"])
         return tickets
+
+    async def list_customers_with_open_tickets(
+        self, status: str = "active", sender: str = "Router"
+    ) -> ToolResult:
+        self.log.record(
+            sender,
+            self.name,
+            "list_customers_with_open_tickets",
+            {"status": status},
+        )
+        return await asyncio.to_thread(self.server.list_customers_with_open_tickets, status)

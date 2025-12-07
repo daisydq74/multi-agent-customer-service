@@ -22,6 +22,12 @@ class CustomerDataAgent:
         self.log.record("router", self.name, f"List customers (status={status})")
         return self.server.list_customers(status=status, limit=limit)
 
+    def list_customers_with_open_tickets(self, status: str = "active") -> ToolResult:
+        self.log.record(
+            "router", self.name, f"List customers with open tickets (status={status})"
+        )
+        return self.server.list_customers_with_open_tickets(status=status)
+
     def update_customer(self, customer_id: int, data: Dict[str, Any]) -> ToolResult:
         self.log.record(self.name, "router", f"Updating customer {customer_id}: {data}")
         result = self.server.update_customer(customer_id, data)

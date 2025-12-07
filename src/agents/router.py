@@ -61,16 +61,18 @@ class RouterAgent:
         return support_reply
 
     def _scenario_active_with_open_tickets(self) -> str:
-        customers = self.data_agent.list_customers(status="active", limit=50).result
-        open_tickets = []
-        for cust in customers:
-            history = self.data_agent.history(cust["id"]).result
-            open_tickets.extend([t for t in history if t["status"] != "resolved"])
-        if not open_tickets:
+        result = self.data_agent.list_customers_with_open_tickets(status="active")
+        payload = result.result or {}
+        customers = payload.get("customers", [])
+        if not customers:
             return "No open tickets for active customers."
-        tickets_summary = ", ".join(
-            f"{t['issue']} for customer {t['customer_id']} ({t['status']})"
-            for t in open_tickets
+
+        tickets_summary = "; ".join(
+            f"{cust['name']} (id={cust['customer_id']}): "
+            + ", ".join(
+                f"{t['issue']} [{t['priority']}]" for t in cust.get("open_tickets", [])
+            )
+            for cust in customers
         )
         return f"Open tickets for active customers: {tickets_summary}"
 
