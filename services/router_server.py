@@ -37,16 +37,23 @@ class RemoteToolResult(SimpleNamespace):
 
 
 class CustomerDataProxy:
-    def __init__(self, client: A2ASimpleClient) -> None:
+    def __init__(self, client: A2ASimpleClient, log: ConversationLog | None = None) -> None:
         self.client = client
+        self.log = log
+
+    def _record(self, action: str, args: Dict[str, Any]) -> None:
+        if self.log:
+            self.log.record("Router", "CustomerData", action, args)
 
     async def fetch_customer(self, customer_id: int, sender: str = "Router") -> RemoteToolResult:
+        self._record("fetch_customer", {"customer_id": customer_id})
         payload = await self.client.send_message(
             {"command": "fetch_customer", "args": {"customer_id": customer_id, "sender": sender}}
         )
         return RemoteToolResult(result=payload.get("result"), error=payload.get("error"))
 
     async def list_customers(self, status: Optional[str] = None, limit: int = 10, sender: str = "Router") -> RemoteToolResult:
+        self._record("list_customers", {"status": status, "limit": limit})
         payload = await self.client.send_message(
             {
                 "command": "list_customers",
@@ -56,6 +63,7 @@ class CustomerDataProxy:
         return RemoteToolResult(result=payload.get("result"), error=payload.get("error"))
 
     async def update_customer(self, customer_id: int, data: Dict[str, Any], sender: str = "Router") -> RemoteToolResult:
+        self._record("update_customer", {"customer_id": customer_id, "data": data})
         payload = await self.client.send_message(
             {
                 "command": "update_customer",
@@ -67,6 +75,7 @@ class CustomerDataProxy:
     async def create_ticket(
         self, customer_id: int, issue: str, priority: str = "medium", sender: str = "Router"
     ) -> RemoteToolResult:
+        self._record("create_ticket", {"customer_id": customer_id, "issue": issue, "priority": priority})
         payload = await self.client.send_message(
             {
                 "command": "create_ticket",
@@ -81,6 +90,7 @@ class CustomerDataProxy:
         return RemoteToolResult(result=payload.get("result"), error=payload.get("error"))
 
     async def history(self, customer_id: int, sender: str = "Router") -> RemoteToolResult:
+        self._record("get_customer_history", {"customer_id": customer_id})
         payload = await self.client.send_message(
             {"command": "history", "args": {"customer_id": customer_id, "sender": sender}}
         )
@@ -94,8 +104,13 @@ class CustomerDataProxy:
 
 
 class SupportProxy:
-    def __init__(self, client: A2ASimpleClient) -> None:
+    def __init__(self, client: A2ASimpleClient, log: ConversationLog | None = None) -> None:
         self.client = client
+        self.log = log
+
+    def _record(self, action: str, args: Dict[str, Any]) -> None:
+        if self.log:
+            self.log.record("Router", "Support", action, args)
 
     async def handle_support(
         self,
@@ -104,6 +119,10 @@ class SupportProxy:
         urgent: bool = False,
         needs_context: bool = False,
     ) -> str:
+        self._record(
+            "handle_support",
+            {"customer": bool(customer), "issue": issue, "urgent": urgent, "needs_context": needs_context},
+        )
         payload = await self.client.send_message(
             {
                 "command": "handle_support",
@@ -118,6 +137,7 @@ class SupportProxy:
         return payload.get("result", "")
 
     async def ensure_ticket(self, customer_id: int, issue: str, priority: str = "medium") -> Dict[str, Any]:
+        self._record("ensure_ticket", {"customer_id": customer_id, "issue": issue, "priority": priority})
         payload = await self.client.send_message(
             {
                 "command": "ensure_ticket",
@@ -127,12 +147,14 @@ class SupportProxy:
         return payload.get("result", {})
 
     async def summarize_history(self, customer_id: int) -> str:
+        self._record("summarize_history", {"customer_id": customer_id})
         payload = await self.client.send_message(
             {"command": "summarize_history", "args": {"customer_id": customer_id}}
         )
         return payload.get("result", "")
 
     async def draft_response(self, context: Dict[str, Any]) -> str:
+        self._record("draft_response", {"context_keys": list(context.keys())})
         payload = await self.client.send_message(
             {"command": "draft_response", "args": {"context": context}}
         )
@@ -142,8 +164,8 @@ class SupportProxy:
 router_agent = RouterAgent(
     None,
     log=conversation_log,
-    data_agent=CustomerDataProxy(data_agent_client),
-    support_agent=SupportProxy(support_agent_client),
+    data_agent=CustomerDataProxy(data_agent_client, conversation_log),
+    support_agent=SupportProxy(support_agent_client, conversation_log),
 )
 
 
