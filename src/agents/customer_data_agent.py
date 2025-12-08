@@ -30,6 +30,7 @@ class CustomerDataAgent:
         self.temperature = float(os.getenv("OPENAI_TEMPERATURE_DATA") or 0)
         self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS_DATA") or 250)
         model = os.getenv("OPENAI_MODEL_DATA", "gpt-4o-mini")
+        self.model = model
         self.llm = OpenAIChatLLM(
             model_env_var="OPENAI_MODEL_DATA", default_model=model, model=model
         )
@@ -75,9 +76,11 @@ class CustomerDataAgent:
 
     async def handle_query(self, query: str, sender: str = "Router") -> Dict[str, Any]:
         """LLM-backed tool selection with deterministic fallback."""
-
+        self.llm.last_used = False
         if not self.llm_enabled:
-            return await self._deterministic_fallback(query, sender)
+            fallback = await self._deterministic_fallback(query, sender)
+            fallback["meta"] = self.llm_meta(False)
+            return fallback
 
         system_prompt = (
             "You decide which MCP tool to call for a customer support backend."
@@ -104,9 +107,13 @@ class CustomerDataAgent:
             if not validated:
                 raise ValueError("Invalid tool selection")
             tool, args = validated
-            return await self._execute_tool(tool, args, sender)
+            response = await self._execute_tool(tool, args, sender)
+            response["meta"] = self.llm_meta(self.llm.last_used)
+            return response
         except Exception:
-            return await self._deterministic_fallback(query, sender)
+            fallback = await self._deterministic_fallback(query, sender)
+            fallback["meta"] = self.llm_meta(self.llm.last_used)
+            return fallback
 
     async def _deterministic_fallback(self, query: str, sender: str) -> Dict[str, Any]:
         customer_id = self._parse_customer_id(query) or 1
@@ -147,6 +154,15 @@ class CustomerDataAgent:
             "error": result.error,
         }
         return response
+
+    def llm_meta(self, used_llm: bool) -> Dict[str, Any]:
+        if used_llm:
+            return {
+                "used_llm": True,
+                "model": self.model,
+                "temperature": self.temperature,
+            }
+        return {"used_llm": False, "model": "none", "temperature": "none"}
 
     def _validate_tool_payload(self, payload: Any) -> Optional[Tuple[str, Dict[str, Any]]]:
         if not isinstance(payload, dict):

@@ -30,6 +30,7 @@ support_agent = SupportAgent(data_agent, conversation_log)
 
 
 async def _handle_command(command: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    support_agent.llm.last_used = False
     if command == "handle_support":
         reply = await support_agent.handle_support(
             args.get("customer"),
@@ -37,29 +38,30 @@ async def _handle_command(command: str, args: Dict[str, Any]) -> Dict[str, Any]:
             urgent=bool(args.get("urgent", False)),
             needs_context=bool(args.get("needs_context", False)),
         )
-        return {"result": reply, "error": None}
+        return {"result": reply, "error": None, "meta": support_agent.llm_meta(support_agent.llm.last_used)}
     if command == "ensure_ticket":
         ticket = await support_agent.ensure_ticket(
             int(args.get("customer_id", 0)), args.get("issue", ""), priority=args.get("priority", "medium")
         )
-        return {"result": ticket, "error": None}
+        return {"result": ticket, "error": None, "meta": support_agent.llm_meta(False)}
     if command == "summarize_history":
         summary = await support_agent.summarize_history(int(args.get("customer_id", 0)))
-        return {"result": summary, "error": None}
+        return {"result": summary, "error": None, "meta": support_agent.llm_meta(False)}
     if command == "draft_response":
         context = args.get("context", {})
         reply = await support_agent.draft_response(context if isinstance(context, dict) else {})
-        return {"result": reply, "error": None}
+        return {"result": reply, "error": None, "meta": support_agent.llm_meta(support_agent.llm.last_used)}
     raise ValueError(f"Unknown command: {command}")
 
 
 async def _handle_message(message: Any) -> Dict[str, Any]:
     conversation_log.clear()
+    support_agent.llm.last_used = False
     if isinstance(message, dict):
         command = message.get("command")
         args = message.get("args", {})
         return await _handle_command(command, args)
-    return {"result": f"SupportAgent received: {message}", "error": None}
+    return {"result": f"SupportAgent received: {message}", "error": None, "meta": support_agent.llm_meta(False)}
 
 
 @app.get("/.well-known/agent-card.json")

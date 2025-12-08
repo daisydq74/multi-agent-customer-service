@@ -39,6 +39,7 @@ class OpenAIChatLLM:
         env_model = os.environ.get(model_env_var) if model_env_var else None
         self.model = model or env_model or default_model
         self.client = OpenAI(api_key=self.api_key) if self.api_key else None
+        self.last_used: bool = False
 
     def generate(
         self,
@@ -48,6 +49,7 @@ class OpenAIChatLLM:
         max_tokens: int = 300,
         response_format: Optional[Dict[str, Any]] = None,
     ) -> str:
+        self.last_used = False
         if not self.client:
             raise RuntimeError("OpenAI client unavailable; missing API key")
 
@@ -65,4 +67,5 @@ class OpenAIChatLLM:
             kwargs["response_format"] = response_format
 
         response = self.client.chat.completions.create(**kwargs)
+        self.last_used = True
         return response.choices[0].message.content or ""

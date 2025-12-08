@@ -37,6 +37,7 @@ class SupportAgent:
             model=model,
         )
         self.llm_enabled = has_api_key()
+        self.model = model
 
     async def handle_support(
         self,
@@ -45,6 +46,7 @@ class SupportAgent:
         urgent: bool = False,
         needs_context: bool = False,
     ) -> str:
+        self.llm.last_used = False
         history_result = None
         if needs_context and customer:
             self.log.record(
@@ -84,6 +86,8 @@ class SupportAgent:
         if not self.llm_enabled:
             return fallback
 
+        self.llm.last_used = False
+
         system_prompt = (
             "You are a helpful customer support agent. Craft concise, empathetic replies that"
             " address the user's issue using any provided customer profile and history."
@@ -118,6 +122,15 @@ class SupportAgent:
             return reply.strip() or fallback
         except Exception:
             return fallback
+
+    def llm_meta(self, used_llm: bool) -> Dict[str, Any]:
+        if used_llm:
+            return {
+                "used_llm": True,
+                "model": self.model,
+                "temperature": self.temperature,
+            }
+        return {"used_llm": False, "model": "none", "temperature": "none"}
 
     def _fallback_response(self, context: Dict[str, Any]) -> str:
         customer = context.get("customer")

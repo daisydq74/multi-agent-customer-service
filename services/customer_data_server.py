@@ -31,25 +31,37 @@ def _serialize_tool_result(result: ToolResult) -> Dict[str, Any]:
     return {"result": result.result, "error": result.error}
 
 
+def _with_meta(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {**payload, "meta": data_agent.llm_meta(data_agent.llm.last_used)}
+
+
 async def _handle_command(command: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    data_agent.llm.last_used = False
     if command == "fetch_customer":
-        return _serialize_tool_result(
+        return _with_meta(
+            _serialize_tool_result(
             await data_agent.fetch_customer(int(args.get("customer_id", 0)), sender=args.get("sender", "Router"))
         )
+        )
     if command == "list_customers":
-        return _serialize_tool_result(
+        return _with_meta(
+            _serialize_tool_result(
             await data_agent.list_customers(
                 args.get("status"), int(args.get("limit", 10)), sender=args.get("sender", "Router")
             )
         )
+        )
     if command == "update_customer":
-        return _serialize_tool_result(
+        return _with_meta(
+            _serialize_tool_result(
             await data_agent.update_customer(
                 int(args.get("customer_id", 0)), args.get("data", {}), sender=args.get("sender", "Router")
             )
         )
+        )
     if command == "create_ticket":
-        return _serialize_tool_result(
+        return _with_meta(
+            _serialize_tool_result(
             await data_agent.create_ticket(
                 int(args.get("customer_id", 0)),
                 args.get("issue", ""),
@@ -57,23 +69,27 @@ async def _handle_command(command: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 sender=args.get("sender", "Router"),
             )
         )
+        )
     if command == "history":
-        return _serialize_tool_result(
+        return _with_meta(
+            _serialize_tool_result(
             await data_agent.history(int(args.get("customer_id", 0)), sender=args.get("sender", "Router"))
+        )
         )
     if command == "high_priority_tickets":
         tickets = await data_agent.high_priority_tickets(args.get("customer_ids", []))
-        return {"result": tickets, "error": None}
+        return _with_meta({"result": tickets, "error": None})
     raise ValueError(f"Unknown command: {command}")
 
 
 async def _handle_message(message: Any) -> Dict[str, Any]:
     conversation_log.clear()
+    data_agent.llm.last_used = False
     if isinstance(message, dict):
         command = message.get("command")
         args = message.get("args", {})
         return await _handle_command(command, args)
-    return {"result": f"CustomerDataAgent received: {message}", "error": None}
+    return _with_meta({"result": f"CustomerDataAgent received: {message}", "error": None})
 
 
 @app.get("/.well-known/agent-card.json")
