@@ -50,8 +50,9 @@ class RouterAgent:
         match = re.search(r"[\w\.\-]+@[\w\-]+\.[\w\-]+", query)
         return match.group(0) if match else None
 
-    async def handle(self, query: str) -> Dict[str, str]:
+    async def handle(self, query: str) -> Dict[str, Any]:
         self.log.clear()
+        self.llm.last_used = False
         normalized = query.lower()
         customer_id = self._parse_customer_id(query) or 1
 
@@ -61,12 +62,22 @@ class RouterAgent:
             if plan_payload:
                 try:
                     llm_response = await self._execute_plan(plan_payload, query, customer_id)
-                    return {"response": llm_response, "log": self.log.dump(), "plan": plan_payload}
+                    return {
+                        "response": llm_response,
+                        "log": self.log.dump(),
+                        "plan": plan_payload,
+                        "meta": self.llm_meta(self.llm.last_used),
+                    }
                 except Exception:
                     pass
 
         response = await self._keyword_route(normalized, query, customer_id)
-        return {"response": response, "log": self.log.dump(), "plan": plan_payload}
+        return {
+            "response": response,
+            "log": self.log.dump(),
+            "plan": plan_payload,
+            "meta": self.llm_meta(self.llm.last_used),
+        }
 
     def _plan_with_llm(self, query: str, customer_id: int) -> Optional[Dict[str, Any]]:
         system_prompt = (
@@ -336,3 +347,12 @@ class RouterAgent:
 
     def _log_step(self, receiver: str, action: str, args: Dict[str, object]) -> None:
         self.log.record("Router", receiver, action, args)
+
+    def llm_meta(self, used_llm: bool) -> Dict[str, Any]:
+        if used_llm:
+            return {
+                "used_llm": True,
+                "model": self.router_model,
+                "temperature": self.router_temperature,
+            }
+        return {"used_llm": False, "model": "none", "temperature": "none"}
