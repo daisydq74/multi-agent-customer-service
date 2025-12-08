@@ -22,11 +22,22 @@ Minimal, runnable reference: FastMCP server over SQLite plus three coordinating 
    pip install -r requirements.txt
    ```
 
+### Environment variables
+
+- `OPENAI_API_KEY` — optional; when set, all agents can use OpenAI Chat Completions.
+- Router: `OPENAI_MODEL_ROUTER` (default: `gpt-4o-mini`), `OPENAI_TEMPERATURE_ROUTER` (default: `0`), `OPENAI_MAX_TOKENS_ROUTER` (default: `300`).
+- Customer Data Agent: `OPENAI_MODEL_DATA` (default: `gpt-4o-mini`), `OPENAI_TEMPERATURE_DATA` (default: `0`), `OPENAI_MAX_TOKENS_DATA` (default: `250`).
+- Support Agent: `OPENAI_MODEL_SUPPORT` (preferred) or `OPENAI_MODEL` fallback (default: `gpt-4o-mini`), `OPENAI_TEMPERATURE_SUPPORT`/`OPENAI_TEMPERATURE` (default: `0`), `OPENAI_MAX_TOKENS_SUPPORT`/`OPENAI_MAX_TOKENS` (default: `300`).
+
+If `OPENAI_API_KEY` is **not** set, the system remains fully rule-based.
+
 ## Running the legacy demo
 ```bash
 python demo.py
 ```
 The demo resets `mcp_server/support.db`, seeds sample data, runs the test scenarios, prints the customer-facing response plus the A2A log for each hop, and writes a transcript to `demos/output/run.log`.
+
+LLM behavior is optional: without `OPENAI_API_KEY` the routes and responses are deterministic; with a key set, the router, data agent, and support agent all use the OpenAI backend.
 
 ## A2A-spec HTTP services
 Three FastAPI/uvicorn services expose the agents as A2A-compatible HTTP endpoints:
@@ -40,6 +51,13 @@ Each service serves an Agent Card at `/.well-known/agent-card.json` and a JSON-R
 Run the end-to-end A2A demo (starts all services, runs scenarios, and writes `demos/output/run_a2a_spec.log`):
 ```bash
 python demos/run_a2a_spec_demo.py
+```
+
+### Quick LLM sanity demo
+
+Run a lightweight script to see routing plans, tool calls, and support responses (works with or without `OPENAI_API_KEY`):
+```bash
+python scripts/llm_sanity_demo.py
 ```
 
 ## MCP Server Tools

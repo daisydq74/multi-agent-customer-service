@@ -1,10 +1,22 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional
+import os
+import re
+from typing import Any, Dict, List, Optional, Tuple
 
 from mcp_server.server import MCPServer, ToolResult
 from src.agents.base import ConversationLog
+from src.llm.openai_chat_llm import OpenAIChatLLM, has_api_key, safe_json_loads
+
+
+ALLOWED_TOOLS: Dict[str, Dict[str, List[str]]] = {
+    "get_customer": {"required": ["customer_id"]},
+    "list_customers": {"required": []},
+    "update_customer": {"required": ["customer_id", "data"]},
+    "create_ticket": {"required": ["customer_id", "issue"]},
+    "get_customer_history": {"required": ["customer_id"]},
+}
 
 
 class CustomerDataAgent:
@@ -14,6 +26,13 @@ class CustomerDataAgent:
         self.server = mcp_server
         self.log = log
         self.name = "CustomerData"
+        self.llm_enabled = has_api_key()
+        self.temperature = float(os.getenv("OPENAI_TEMPERATURE_DATA") or 0)
+        self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS_DATA") or 250)
+        model = os.getenv("OPENAI_MODEL_DATA", "gpt-4o-mini")
+        self.llm = OpenAIChatLLM(
+            model_env_var="OPENAI_MODEL_DATA", default_model=model, model=model
+        )
 
     async def fetch_customer(self, customer_id: int, sender: str = "Router") -> ToolResult:
         self.log.record(sender, self.name, "get_customer", {"customer_id": customer_id})
@@ -53,3 +72,115 @@ class CustomerDataAgent:
             if history.result:
                 tickets.extend([t for t in history.result if t.get("priority") == "high"])
         return tickets
+
+    async def handle_query(self, query: str, sender: str = "Router") -> Dict[str, Any]:
+        """LLM-backed tool selection with deterministic fallback."""
+
+        if not self.llm_enabled:
+            return await self._deterministic_fallback(query, sender)
+
+        system_prompt = (
+            "You decide which MCP tool to call for a customer support backend."
+            " Allowed tools: get_customer, list_customers, update_customer, create_ticket, get_customer_history."
+            " Return a JSON object only with fields 'tool' and 'args'."
+        )
+        user_prompt = (
+            "User request: "
+            + query
+            + "\nReturn JSON. Do not include markdown or commentary."
+        )
+
+        try:
+            reply = await asyncio.to_thread(
+                self.llm.generate,
+                system_prompt,
+                user_prompt,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                response_format={"type": "json_object"},
+            )
+            payload = safe_json_loads(reply)
+            validated = self._validate_tool_payload(payload)
+            if not validated:
+                raise ValueError("Invalid tool selection")
+            tool, args = validated
+            return await self._execute_tool(tool, args, sender)
+        except Exception:
+            return await self._deterministic_fallback(query, sender)
+
+    async def _deterministic_fallback(self, query: str, sender: str) -> Dict[str, Any]:
+        customer_id = self._parse_customer_id(query) or 1
+        result = await self.fetch_customer(customer_id, sender=sender)
+        return {
+            "tool": "get_customer",
+            "args": {"customer_id": customer_id},
+            "result": result.result,
+            "error": result.error,
+        }
+
+    async def _execute_tool(self, tool: str, args: Dict[str, Any], sender: str) -> Dict[str, Any]:
+        result: ToolResult
+        if tool == "get_customer":
+            result = await self.fetch_customer(int(args["customer_id"]), sender=sender)
+        elif tool == "list_customers":
+            result = await self.list_customers(
+                args.get("status"), int(args.get("limit", 10)), sender=sender
+            )
+        elif tool == "update_customer":
+            result = await self.update_customer(
+                int(args["customer_id"]), args.get("data", {}), sender=sender
+            )
+        elif tool == "create_ticket":
+            result = await self.create_ticket(
+                int(args["customer_id"]),
+                args.get("issue", ""),
+                args.get("priority", "medium"),
+                sender=sender,
+            )
+        else:  # get_customer_history
+            result = await self.history(int(args["customer_id"]), sender=sender)
+
+        response: Dict[str, Any] = {
+            "tool": tool,
+            "args": args,
+            "result": result.result,
+            "error": result.error,
+        }
+        return response
+
+    def _validate_tool_payload(self, payload: Any) -> Optional[Tuple[str, Dict[str, Any]]]:
+        if not isinstance(payload, dict):
+            return None
+        tool = payload.get("tool")
+        args = payload.get("args")
+        if tool not in ALLOWED_TOOLS or not isinstance(args, dict):
+            return None
+        required = ALLOWED_TOOLS[tool]["required"]
+        for key in required:
+            if key not in args:
+                return None
+        if tool in {"get_customer", "get_customer_history", "update_customer", "create_ticket"}:
+            if not self._is_int(args.get("customer_id")):
+                return None
+            args["customer_id"] = int(args["customer_id"])
+        if tool == "update_customer" and not isinstance(args.get("data"), dict):
+            return None
+        if tool == "create_ticket":
+            if not isinstance(args.get("issue"), str):
+                return None
+            if "priority" in args and not isinstance(args.get("priority"), str):
+                return None
+        if tool == "list_customers" and args and not isinstance(args, dict):
+            return None
+        return tool, args
+
+    def _parse_customer_id(self, query: str) -> Optional[int]:
+        match = re.search(r"(?:id|customer)\s*(\d+)", query.lower())
+        return int(match.group(1)) if match else None
+
+    def _is_int(self, value: Any) -> bool:
+        try:
+            int(value)
+            return True
+        except (TypeError, ValueError):
+            return False
