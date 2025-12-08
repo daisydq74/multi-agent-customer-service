@@ -13,6 +13,8 @@ class SupportAgent:
     """Handles support reasoning and may request more context from data agent."""
 
     def __init__(self, data_agent: CustomerDataAgent, log: ConversationLog) -> None:
+        if not has_api_key():
+            raise RuntimeError("Missing OPENAI_API_KEY (LLM routing is required).")
         self.data_agent = data_agent
         self.log = log
         self.name = "Support"
@@ -36,7 +38,6 @@ class SupportAgent:
             default_model=model,
             model=model,
         )
-        self.llm_enabled = has_api_key()
         self.model = model
 
     async def handle_support(
@@ -80,11 +81,7 @@ class SupportAgent:
         )
 
     async def draft_response(self, context: Dict[str, Any]) -> str:
-        """LLM-backed (optional) support reply used by the router plan."""
-
-        fallback = self._fallback_response(context)
-        if not self.llm_enabled:
-            return fallback
+        """LLM-backed support reply used by the router plan."""
 
         self.llm.last_used = False
 
@@ -119,9 +116,9 @@ class SupportAgent:
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
             )
-            return reply.strip() or fallback
+            return reply.strip() or self._fallback_response(context)
         except Exception:
-            return fallback
+            return self._fallback_response(context)
 
     def llm_meta(self, used_llm: bool) -> Dict[str, Any]:
         if used_llm:

@@ -1,8 +1,6 @@
 from __future__ import annotations
-
 import asyncio
 import os
-import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from mcp_server.server import MCPServer, ToolResult
@@ -23,10 +21,11 @@ class CustomerDataAgent:
     """Specialist agent wrapping MCP data tools."""
 
     def __init__(self, mcp_server: MCPServer, log: ConversationLog) -> None:
+        if not has_api_key():
+            raise RuntimeError("Missing OPENAI_API_KEY (LLM routing is required).")
         self.server = mcp_server
         self.log = log
         self.name = "CustomerData"
-        self.llm_enabled = has_api_key()
         self.temperature = float(os.getenv("OPENAI_TEMPERATURE_DATA") or 0)
         self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS_DATA") or 250)
         model = os.getenv("OPENAI_MODEL_DATA", "gpt-4o-mini")
@@ -75,12 +74,8 @@ class CustomerDataAgent:
         return tickets
 
     async def handle_query(self, query: str, sender: str = "Router") -> Dict[str, Any]:
-        """LLM-backed tool selection with deterministic fallback."""
+        """LLM-backed tool selection with strict validation and no keyword fallback."""
         self.llm.last_used = False
-        if not self.llm_enabled:
-            fallback = await self._deterministic_fallback(query, sender)
-            fallback["meta"] = self.llm_meta(False)
-            return fallback
 
         system_prompt = (
             "You decide which MCP tool to call for a customer support backend."
@@ -111,19 +106,13 @@ class CustomerDataAgent:
             response["meta"] = self.llm_meta(self.llm.last_used)
             return response
         except Exception:
-            fallback = await self._deterministic_fallback(query, sender)
-            fallback["meta"] = self.llm_meta(self.llm.last_used)
-            return fallback
-
-    async def _deterministic_fallback(self, query: str, sender: str) -> Dict[str, Any]:
-        customer_id = self._parse_customer_id(query) or 1
-        result = await self.fetch_customer(customer_id, sender=sender)
-        return {
-            "tool": "get_customer",
-            "args": {"customer_id": customer_id},
-            "result": result.result,
-            "error": result.error,
-        }
+            return {
+                "tool": None,
+                "args": {},
+                "result": None,
+                "error": "Unable to process request. Please rephrase with the required details, including your customer id if needed.",
+                "meta": self.llm_meta(self.llm.last_used),
+            }
 
     async def _execute_tool(self, tool: str, args: Dict[str, Any], sender: str) -> Dict[str, Any]:
         result: ToolResult
@@ -189,10 +178,6 @@ class CustomerDataAgent:
         if tool == "list_customers" and args and not isinstance(args, dict):
             return None
         return tool, args
-
-    def _parse_customer_id(self, query: str) -> Optional[int]:
-        match = re.search(r"(?:id|customer)\s*(\d+)", query.lower())
-        return int(match.group(1)) if match else None
 
     def _is_int(self, value: Any) -> bool:
         try:
